@@ -1,89 +1,65 @@
-import React, { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell } from "@/components/ui/table";
+import streamlit as st
+import pandas as pd
+import plotly.express as px
 
-export default function AppStoreDataTool() {
-  const [csvData, setCsvData] = useState([]);
-  const [totals, setTotals] = useState({});
+st.set_page_config(page_title="📊 App Analytics Dashboard", layout="wide")
+st.title("📊 Universal App Store Analytics Dashboard")
+st.markdown("Upload your CSV file from **App Store Connect**, **Google Play Console**, or **Data.ai** to see insights and graphs.")
 
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+uploaded_file = st.file_uploader("📁 Upload your CSV file here", type=["csv"])
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      const rows = text.trim().split("\n").map((row) => row.split(","));
-      const headers = rows[0];
-      const data = rows.slice(1);
+def detect_platform(columns):
+    cols = [col.lower().strip() for col in columns]
+    if "app name" in cols and "downloads" in cols:
+        return "App Store Connect"
+    elif "package name" in cols and "installs" in cols:
+        return "Google Play Console"
+    elif "product" in cols and "downloads" in cols and "revenue" in cols:
+        return "Data.ai"
+    return "Unknown"
 
-      const numericTotals = {};
-      headers.forEach((header, i) => {
-        let total = 0;
-        let isNumeric = true;
-        for (let row of data) {
-          const val = parseFloat(row[i]);
-          if (!isNaN(val)) total += val;
-          else isNumeric = false;
-        }
-        if (isNumeric) numericTotals[header] = total;
-      });
+def preprocess_and_analyze(df, platform):
+    df.columns = [col.lower().strip() for col in df.columns]
 
-      setCsvData([headers, ...data]);
-      setTotals(numericTotals);
-    };
-    reader.readAsText(file);
-  };
+    if "date" not in df.columns:
+        raise ValueError("CSV must contain a 'Date' column.")
+    df["date"] = pd.to_datetime(df["date"], errors='coerce')
+    df = df.dropna(subset=["date"])
 
-  return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">📊 App Store Data Analyzer</h1>
-      <Input type="file" accept=".csv" onChange={handleFileUpload} />
+    if platform == "App Store Connect":
+        downloads_col = "downloads"
+        revenue_col = "iap revenue" if "iap revenue" in df.columns else "revenue"
+    elif platform == "Google Play Console":
+        downloads_col = "installs"
+        revenue_col = "revenue"
+    elif platform == "Data.ai":
+        downloads_col = "downloads"
+        revenue_col = "revenue"
+    else:
+        raise ValueError("Unknown platform. Please upload a valid file.")
 
-      {csvData.length > 0 && (
-        <Card>
-          <CardContent>
-            <h2 className="text-xl font-semibold mb-4">Preview</h2>
-            <div className="overflow-auto max-h-[400px]">
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    {csvData[0].map((header, i) => (
-                      <TableHeaderCell key={i}>{header}</TableHeaderCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {csvData.slice(1, 11).map((row, i) => (
-                    <TableRow key={i}>
-                      {row.map((cell, j) => (
-                        <TableCell key={j}>{cell}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+    daily = df.groupby("date")[[downloads_col, revenue_col]].sum().reset_index()
+    return daily, downloads_col, revenue_col
 
-      {Object.keys(totals).length > 0 && (
-        <Card>
-          <CardContent>
-            <h2 className="text-xl font-semibold mb-4">Column Totals</h2>
-            <ul className="list-disc pl-6">
-              {Object.entries(totals).map(([header, total], i) => (
-                <li key={i}>
-                  <strong>{header}:</strong> {total.toLocaleString()}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
+        platform = detect_platform(df.columns)
+        if platform == "Unknown":
+            st.error("❌ Unsupported CSV format. Make sure it’s from App Store Connect, Google Play Console, or Data.ai.")
+        else:
+            st.success(f"✅ Platform detected: {platform}")
+            daily, downloads_col, revenue_col = preprocess_and_analyze(df, platform)
+
+            st.subheader("📈 Daily Downloads")
+            fig1 = px.line(daily, x="date", y=downloads_col, labels={"date": "Date", downloads_col: "Downloads"}, title="Downloads Over Time")
+            st.plotly_chart(fig1, use_container_width=True)
+
+            st.subheader("💵 Daily Revenue")
+            fig2 = px.line(daily, x="date", y=revenue_col, labels={"date": "Date", revenue_col: "Revenue"}, title="Revenue Over Time")
+            st.plotly_chart(fig2, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"🚫 Error: {e}")
+else:
+    st.info("📌 Please upload a CSV file to start.")
