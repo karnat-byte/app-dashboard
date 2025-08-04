@@ -1,34 +1,42 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Load data
-@st.cache
-def load_data():
-    df = pd.read_csv('Sample_AppStore_Data.csv', encoding='ascii')
-    return df
+st.set_page_config(page_title="App Store Dashboard", layout="wide")
 
-df = load_data()
+st.title("📊 App Store Data Dashboard")
 
-# Title
-st.title('App Store Analytics Dashboard')
+# 📁 Upload section
+uploaded_file = st.file_uploader("Upload your App Store CSV file", type=["csv"])
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
 
-# Show some key metrics
-total_downloads = df['Downloads'].sum()
-total_revenue = df['Proceeds'].sum()
+        st.success("✅ File uploaded successfully!")
 
-st.metric('Total Downloads', total_downloads)
-st.metric('Total Revenue', '${:,.2f}'.format(total_revenue))
+        # Show raw data
+        if st.checkbox("Show raw data"):
+            st.write(df)
 
-# Plot downloads over time
-fig1 = px.line(df, x='Date', y='Downloads', title='Downloads Over Time')
-st.plotly_chart(fig1)
+        # Basic metrics
+        st.subheader("📈 Key Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Downloads", f"{df['downloads'].sum():,}")
+        col2.metric("Revenue", f"${df['revenue'].sum():,.2f}")
+        col3.metric("IAP", f"${df['iap'].sum():,.2f}")
+        col4.metric("Active Subscriptions", f"{df['active_subscriptions'].sum():,}")
 
-# Plot in-app purchases
-fig2 = px.bar(df, x='App Name', y='In-App Purchases', title='In-App Purchases by App')
-st.plotly_chart(fig2)
+        # 📊 Charts
+        st.subheader("📅 Daily Trends")
+        df['date'] = pd.to_datetime(df['date'])
 
-# Show data
-if st.checkbox('Show raw data'):
-    st.write(df)
+        fig_downloads = px.line(df, x="date", y="downloads", title="Daily Downloads")
+        fig_revenue = px.line(df, x="date", y="revenue", title="Daily Revenue")
+
+        st.plotly_chart(fig_downloads, use_container_width=True)
+        st.plotly_chart(fig_revenue, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"❌ Error reading CSV: {e}")
+else:
+    st.info("📤 Please upload a CSV file to begin.")
