@@ -1,91 +1,65 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
+import plotly.express as px
 
-st.set_page_config(page_title="App Performance Dashboard", layout="wide")
+st.set_page_config(page_title="📊 App Analytics Dashboard", layout="wide")
+st.title("📊 Universal App Store Analytics Dashboard")
+st.markdown("Upload your CSV file from **App Store Connect**, **Google Play Console**, or **Data.ai** to see insights and graphs.")
 
-st.title("📊 App Performance Dashboard")
+uploaded_file = st.file_uploader("📁 Upload your CSV file here", type=["csv"])
 
-# Upload CSV from sidebar
-st.sidebar.header("Upload Your CSV")
-uploaded_file = st.sidebar.file_uploader("Choose a file", type=["csv"])
+def detect_platform(columns):
+    cols = [col.lower().strip() for col in columns]
+    if "app name" in cols and "downloads" in cols:
+        return "App Store Connect"
+    elif "package name" in cols and "installs" in cols:
+        return "Google Play Console"
+    elif "product" in cols and "downloads" in cols and "revenue" in cols:
+        return "Data.ai"
+    return "Unknown"
 
-@st.cache_data
-def load_csv(file):
-    return pd.read_csv(file)
+def preprocess_and_analyze(df, platform):
+    df.columns = [col.lower().strip() for col in df.columns]
 
-# Platform detection function
-def detect_platform(df):
-    cols = df.columns
-    if 'App Name' in cols and 'Total Downloads' in cols:
-        return 'App Store'
-    elif 'Package Name' in cols and 'User Acquisitions' in cols:
-        return 'Google Play'
-    elif 'Platform' in cols and 'Revenue' in cols:
-        return 'Data.ai'
+    if "date" not in df.columns:
+        raise ValueError("CSV must contain a 'Date' column.")
+    df["date"] = pd.to_datetime(df["date"], errors='coerce')
+    df = df.dropna(subset=["date"])
+
+    if platform == "App Store Connect":
+        downloads_col = "downloads"
+        revenue_col = "iap revenue" if "iap revenue" in df.columns else "revenue"
+    elif platform == "Google Play Console":
+        downloads_col = "installs"
+        revenue_col = "revenue"
+    elif platform == "Data.ai":
+        downloads_col = "downloads"
+        revenue_col = "revenue"
     else:
-        return 'Unknown'
+        raise ValueError("Unknown platform. Please upload a valid file.")
 
-# Main logic
+    daily = df.groupby("date")[[downloads_col, revenue_col]].sum().reset_index()
+    return daily, downloads_col, revenue_col
+
 if uploaded_file:
-    df = load_csv(uploaded_file)
-    platform = detect_platform(df)
-    st.sidebar.success(f"Platform Detected: {platform}")
+    try:
+        df = pd.read_csv(uploaded_file)
+        platform = detect_platform(df.columns)
+        if platform == "Unknown":
+            st.error("❌ Unsupported CSV format. Make sure it’s from App Store Connect, Google Play Console, or Data.ai.")
+        else:
+            st.success(f"✅ Platform detected: {platform}")
+            daily, downloads_col, revenue_col = preprocess_and_analyze(df, platform)
 
-    st.subheader(f"📂 Data Preview ({platform})")
-    st.dataframe(df.head(20), use_container_width=True)
+            st.subheader("📈 Daily Downloads")
+            fig1 = px.line(daily, x="date", y=downloads_col, labels={"date": "Date", downloads_col: "Downloads"}, title="Downloads Over Time")
+            st.plotly_chart(fig1, use_container_width=True)
 
-    # Analysis by platform
-    if platform == 'App Store':
-        downloads = df['Total Downloads'].sum()
-        revenue = df['Total Proceeds'].sum()
-        iaps = df['In-App Purchases'].sum() if 'In-App Purchases' in df.columns else 0
+            st.subheader("💵 Daily Revenue")
+            fig2 = px.line(daily, x="date", y=revenue_col, labels={"date": "Date", revenue_col: "Revenue"}, title="Revenue Over Time")
+            st.plotly_chart(fig2, use_container_width=True)
 
-    elif platform == 'Google Play':
-        downloads = df['User Acquisitions'].sum()
-        revenue = df['Total Revenue (USD)'].sum() if 'Total Revenue (USD)' in df.columns else 0
-        iaps = df['In-App Purchases'].sum() if 'In-App Purchases' in df.columns else 0
-
-    elif platform == 'Data.ai':
-        downloads = df['Downloads'].sum()
-        revenue = df['Revenue'].sum()
-        iaps = df['In-App Purchases'].sum() if 'In-App Purchases' in df.columns else 0
-    else:
-        st.error("❌ Unsupported CSV format.")
-        st.stop()
-
-    # Show metrics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📥 Total Downloads", f"{downloads:,}")
-    col2.metric("💰 Total Revenue", f"${revenue:,.2f}")
-    col3.metric("🧩 In-App Purchases", f"{iaps:,}")
-
-    # Show chart if date column exists
-    date_col = None
-    for col in df.columns:
-        if 'date' in col.lower():
-            date_col = col
-            break
-
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col])
-        df_grouped = df.groupby(date_col).agg({
-            'Total Downloads': 'sum' if 'Total Downloads' in df.columns else 'first',
-            'Revenue': 'sum' if 'Revenue' in df.columns else 'first'
-        }).reset_index()
-
-        st.markdown("### 📈 Trends Over Time")
-        chart = alt.Chart(df_grouped).transform_fold(
-            ['Total Downloads', 'Revenue'],
-            as_=['Metric', 'Value']
-        ).mark_line().encode(
-            x=date_col,
-            y='Value:Q',
-            color='Metric:N'
-        ).properties(width='container')
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.warning("⚠️ No date column found for trend chart.")
-
+    except Exception as e:
+        st.error(f"🚫 Error: {e}")
 else:
-    st.info("📤 Please upload a CSV file to begin.")
+    st.info("📌 Please upload a CSV file to start.")
